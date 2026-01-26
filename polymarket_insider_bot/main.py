@@ -341,16 +341,95 @@ class InsiderDetectionBot:
         except Exception as e:
             logger.error(f"Health check failed: {e}")
 
+    def verify_startup(self):
+        """
+        Verify all systems are ready before starting monitoring
+
+        Returns:
+            bool: True if all checks pass
+        """
+        print("\n" + "="*60)
+        print("  POLYMARKET INSIDER BOT - STARTUP")
+        print("="*60 + "\n")
+
+        # Check 1: Configuration
+        print("[1/5] Checking configuration...")
+        try:
+            Config.validate()
+            print("  ✅ Configuration valid\n")
+        except ValueError as e:
+            print(f"  ❌ Configuration error: {e}\n")
+            print("Please check your .env file")
+            print("Run: python -m polymarket_insider_bot.utils.get_chat_id")
+            return False
+
+        # Check 2: Database
+        print("[2/5] Initializing database...")
+        try:
+            stats = self.db.get_statistics()
+            print(f"  ✅ Database ready ({stats['total_flagged']} trades logged)\n")
+        except Exception as e:
+            print(f"  ❌ Database error: {e}\n")
+            return False
+
+        # Check 3: Telegram
+        print("[3/5] Testing Telegram connection...")
+        try:
+            if self.telegram.test_connection():
+                print("  ✅ Telegram connected\n")
+            else:
+                print("  ⚠️  Telegram connection issue (will continue)\n")
+        except Exception as e:
+            print(f"  ⚠️  Telegram error: {e} (will continue)\n")
+
+        # Check 4: Polygon RPC
+        print("[4/5] Testing Polygon RPC...")
+        try:
+            if self.polygon_rpc.w3.is_connected():
+                block = self.polygon_rpc.w3.eth.block_number
+                print(f"  ✅ Polygon RPC connected (block #{block:,})\n")
+            else:
+                print("  ❌ Cannot connect to Polygon RPC\n")
+                print("Check POLYGON_RPC_URL in .env")
+                return False
+        except Exception as e:
+            print(f"  ❌ Polygon RPC error: {e}\n")
+            return False
+
+        # Check 5: Polymarket
+        print("[5/5] Testing Polymarket API...")
+        try:
+            markets = self.polymarket.get_markets(limit=5)
+            if markets:
+                print(f"  ✅ Polymarket API connected ({len(markets)} markets fetched)\n")
+            else:
+                print("  ⚠️  Polymarket returned no markets (may be temporary)\n")
+        except Exception as e:
+            print(f"  ⚠️  Polymarket API issue: {e} (will continue)\n")
+
+        print("="*60)
+        print("✅ STARTUP CHECKS COMPLETE - Starting monitoring...")
+        print("="*60)
+        print()
+        return True
+
     def run(self):
         """Main bot loop"""
         logger.info("Starting Polymarket Insider Detection Bot")
+
+        # Run startup verification
+        if not self.verify_startup():
+            print("\n❌ Startup verification failed!")
+            print("\nTroubleshooting:")
+            print("  1. Run: python -m polymarket_insider_bot.tests.test_api_connections")
+            print("  2. Check your .env file")
+            print("  3. Get Chat ID: python -m polymarket_insider_bot.utils.get_chat_id")
+            print()
+            sys.exit(1)
+
         logger.info(f"Scan interval: {Config.SCAN_INTERVAL_SECONDS}s")
         logger.info(f"Min bet size: ${Config.MIN_BET_SIZE_USD:,.0f}")
         logger.info(f"Max probability: {Config.MAX_PROBABILITY * 100}%")
-
-        # Test Telegram connection
-        if not self.telegram.test_connection():
-            logger.error("Telegram connection test failed. Continuing anyway...")
 
         # Initial health check
         self.run_health_check()
@@ -388,11 +467,26 @@ class InsiderDetectionBot:
 
 def main():
     """Entry point"""
+    print("\n" + "🎯"*30)
+    print("   POLYMARKET INSIDER TRADING DETECTION BOT")
+    print("🎯"*30 + "\n")
+
     try:
         bot = InsiderDetectionBot()
         bot.run()
+    except KeyboardInterrupt:
+        print("\n\n" + "="*60)
+        print("Bot stopped by user (Ctrl+C)")
+        print("="*60 + "\n")
+        sys.exit(0)
     except Exception as e:
         logger.error(f"Fatal error: {e}")
+        print("\n" + "="*60)
+        print(f"❌ FATAL ERROR: {e}")
+        print("="*60 + "\n")
+        print("Check logs for details:")
+        print("  tail -f logs/bot_*.log")
+        print()
         sys.exit(1)
 
 

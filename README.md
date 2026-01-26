@@ -113,7 +113,7 @@ MIN_BET_SIZE_USD=10000
 MAX_PROBABILITY=0.20
 ```
 
-### 5. Get Free Polygon RPC
+**Get Free Polygon RPC:**
 
 **Option A: Alchemy (Recommended)**
 1. Go to [alchemy.com](https://www.alchemy.com/)
@@ -128,17 +128,147 @@ MAX_PROBABILITY=0.20
 POLYGON_RPC_URL=https://polygon-rpc.com
 ```
 
-### 6. Run the Bot
+---
+
+## ⚠️ IMPORTANT: Test Before Running
+
+**DO NOT skip this step!** Run these tests to verify everything works before starting the bot.
+
+### Step 1: Test API Connections (30 seconds)
+
+```bash
+python -m polymarket_insider_bot.tests.test_api_connections
+```
+
+**What it tests:**
+- ✅ Telegram bot can send messages
+- ✅ Polymarket API is accessible
+- ✅ Polygon RPC is connected
+
+**Expected output:**
+```
+==================================================
+  API CONNECTION TESTS
+==================================================
+
+✅ Telegram: Connected to @KujiraGari_bot - Test message sent!
+✅ Polymarket: Connected - Found 247 active markets
+✅ Polygon RPC: Connected - Block #52,847,392
+
+==================================================
+✅ ALL TESTS PASSED - Ready to run bot!
+==================================================
+```
+
+**If any test fails**, fix the issue before continuing:
+- Telegram failed? Check `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in .env
+- Polymarket failed? Check internet connection
+- Polygon RPC failed? Check `POLYGON_RPC_URL` or get new key from alchemy.com
+
+---
+
+### Step 2: Test Telegram Alerts (1 minute)
+
+```bash
+python -m polymarket_insider_bot.tests.test_telegram_alerts
+```
+
+**What it does:**
+- Sends 3 formatted test alerts to your Telegram
+- CRITICAL alert (score 95) - Maduro example
+- HIGH alert (score 75) - Apple Vision Pro example
+- MEDIUM alert (score 55) - Politics example
+
+**Check your Telegram** - you should receive 3 messages with:
+- ✅ Proper formatting and emojis
+- ✅ All trade details visible
+- ✅ Red flags listed clearly
+
+This proves alert delivery and formatting works correctly.
+
+---
+
+### Step 3: Test Live Data Fetching (1 minute)
+
+```bash
+python -m polymarket_insider_bot.tests.test_polymarket_live_data
+```
+
+**What it does:**
+- Fetches real active markets from Polymarket
+- Filters by high-risk categories (Politics, Business, Tech, etc.)
+- Shows markets organized by category with volumes
+- Fetches recent trades with wallet addresses
+
+**Expected output:**
+```
+==================================================
+  LIVE POLYMARKET MARKETS
+==================================================
+
+📊 Politics & Geopolitics (34 markets)
+  ├─ "Trump wins 2028 election" - $4,200,000
+  ├─ "Biden approval rating >50% by March" - $890,000
+  ...
+
+📊 Business & Corporate (18 markets)
+  ├─ "Apple announces Vision Pro 2" - $1,100,000
+  ...
+
+✅ Found 127 high-risk markets
+==================================================
+```
+
+This proves the bot can fetch and parse real Polymarket data.
+
+---
+
+### Step 4: Run the Bot (Only After All Tests Pass)
 
 ```bash
 # Start the bot
 python -m polymarket_insider_bot.main
-
-# Or run in background (Linux/Mac)
-nohup python -m polymarket_insider_bot.main > bot.log 2>&1 &
 ```
 
-You should immediately receive a health check message in Telegram!
+**You'll see:**
+```
+==================================================
+  POLYMARKET INSIDER BOT - STARTUP
+==================================================
+
+[1/5] Checking configuration...
+  ✅ Configuration valid
+
+[2/5] Initializing database...
+  ✅ Database ready (0 trades logged)
+
+[3/5] Testing Telegram connection...
+  ✅ Telegram connected
+
+[4/5] Testing Polygon RPC...
+  ✅ Polygon RPC connected (block #52,847,392)
+
+[5/5] Testing Polymarket API...
+  ✅ Polymarket API connected (100 markets fetched)
+
+==================================================
+✅ STARTUP CHECKS COMPLETE - Starting monitoring...
+==================================================
+```
+
+The bot will:
+- ✅ Send an immediate health check to your Telegram
+- ✅ Start scanning every 5 minutes
+- ✅ Send alerts when suspicious trades detected
+- ✅ Press `Ctrl+C` to stop
+
+**Run in background (Linux/Mac):**
+```bash
+nohup python -m polymarket_insider_bot.main > bot.log 2>&1 &
+
+# View logs
+tail -f bot.log
+```
 
 ## 📁 Project Structure
 
@@ -269,14 +399,59 @@ SELECT alert_tier, COUNT(*) FROM alert_history GROUP BY alert_tier;
 
 ## 🐛 Troubleshooting
 
-### Bot Won't Start
+### Test Failures
+
+**If test_api_connections.py fails:**
 
 ```bash
-# Check configuration
-python -c "from polymarket_insider_bot.config import Config; Config.validate()"
+# Telegram test failed:
+python -m polymarket_insider_bot.utils.get_chat_id
+# Make sure you messaged the bot first!
+# Add the Chat ID to .env
 
-# Test Telegram connection
-python -c "from polymarket_insider_bot.alerts.telegram import TelegramAlertBot; bot = TelegramAlertBot(); bot.test_connection()"
+# Polymarket test failed:
+# Check internet connection
+# Try: curl https://gamma-api.polymarket.com/markets?limit=1
+
+# Polygon RPC test failed:
+# Check POLYGON_RPC_URL in .env
+# Get free key from alchemy.com
+# Try public RPC: https://polygon-rpc.com
+```
+
+**If test_telegram_alerts.py fails:**
+- Error "TELEGRAM_CHAT_ID not configured": Run `get_chat_id.py` first
+- Messages not received: Check bot isn't blocked on Telegram
+- Network error: Check internet connection
+
+**If test_polymarket_live_data.py fails:**
+- "No markets found": Polymarket API may be temporarily down (rare)
+- Network error: Check firewall isn't blocking requests
+- This is non-critical - bot will retry automatically
+
+---
+
+### Bot Won't Start
+
+**"Configuration error":**
+```bash
+# Check your .env file exists and has required values:
+cat .env
+
+# Should have:
+# TELEGRAM_BOT_TOKEN=8523896394:AAETPrSCbHB58cyiqDU1PTlSObAsljczVvw
+# TELEGRAM_CHAT_ID=your_chat_id
+# POLYGON_RPC_URL=https://polygon-mainnet.g.alchemy.com/v2/YOUR_KEY
+```
+
+**"Startup verification failed":**
+- Run the test scripts first (see Testing section above)
+- Fix any failing tests before running main bot
+
+**Quick validation:**
+```bash
+# Test everything at once:
+python -m polymarket_insider_bot.tests.test_api_connections
 ```
 
 ### No Alerts Received
