@@ -1,0 +1,25 @@
+# Core dependencies
+requests>=2.31.0
+websocket-client>=1.7.0
+python-dotenv>=1.0.0
+
+# Blockchain & Web3
+web3>=6.15.0
+eth-account>=0.11.0
+
+# Database
+sqlalchemy>=2.0.25
+
+# Telegram
+python-telegram-bot>=20.7
+
+# Data processing
+pydantic>=2.5.0
+
+# Async support
+aiohttp>=3.9.0
+asyncio-mqtt>=0.16.0
+
+# Utilities
+python-dateutil>=2.8.2
+pytz>=2024.1
