@@ -27,6 +27,7 @@ class PolymarketAPI:
     def __init__(self):
         self.rest_url = Config.POLYMARKET_REST_URL
         self.gamma_url = Config.POLYMARKET_GAMMA_URL
+        self.subgraph_url = "https://api.thegraph.com/subgraphs/name/polymarket/matic-markets"
         self.api_key = Config.POLYMARKET_API_KEY
 
         self.session = requests.Session()
@@ -35,7 +36,7 @@ class PolymarketAPI:
                 'Authorization': f'Bearer {self.api_key}'
             })
 
-        logger.info("Polymarket API client initialized")
+        logger.info("Polymarket API client initialized (using Subgraph for trades)")
 
     @retry_with_backoff(max_retries=3, backoff_seconds=[1, 2, 4])
     def get_markets(
@@ -123,6 +124,81 @@ class PolymarketAPI:
             return []
 
     @retry_with_backoff(max_retries=3, backoff_seconds=[1, 2, 4])
+    def get_trades_from_subgraph(
+        self,
+        limit: int = 100,
+        since_timestamp: Optional[int] = None
+    ) -> List[Dict]:
+        """
+        Get recent trades from Polymarket Subgraph (public, no auth required)
+
+        Args:
+            limit: Number of trades to fetch
+            since_timestamp: Only trades after this timestamp
+
+        Returns:
+            List of trade dicts from Subgraph
+        """
+        try:
+            # GraphQL query to get recent trades
+            # The Subgraph tracks fpmmTrades (Fixed Product Market Maker trades)
+            query = """
+            query GetRecentTrades($limit: Int!, $timestamp: Int) {
+              fpmmTrades(
+                first: $limit,
+                orderBy: creationTimestamp,
+                orderDirection: desc,
+                where: { creationTimestamp_gt: $timestamp }
+              ) {
+                id
+                fpmm {
+                  id
+                  condition {
+                    id
+                  }
+                }
+                creator {
+                  id
+                }
+                creationTimestamp
+                collateralAmount
+                outcomeTokensAmount
+                type
+              }
+            }
+            """
+
+            variables = {
+                "limit": min(limit, 1000),  # Subgraph has max 1000
+                "timestamp": since_timestamp or 0
+            }
+
+            response = self.session.post(
+                self.subgraph_url,
+                json={'query': query, 'variables': variables},
+                timeout=15
+            )
+            response.raise_for_status()
+
+            data = response.json()
+
+            if 'errors' in data:
+                logger.error(f"Subgraph query errors: {data['errors']}")
+                return []
+
+            trades = data.get('data', {}).get('fpmmTrades', [])
+            logger.info(f"Fetched {len(trades)} trades from Subgraph")
+
+            return trades
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching trades from Subgraph: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"Unexpected error in Subgraph query: {e}")
+            return []
+
+    @retry_with_backoff(max_retries=3, backoff_seconds=[1, 2, 4])
     def get_all_recent_trades(
         self,
         limit: int = 500,
@@ -131,6 +207,8 @@ class PolymarketAPI:
         """
         Get recent trades across all markets
 
+        Now uses Subgraph instead of CLOB API (which requires auth)
+
         Args:
             limit: Number of trades to fetch
             since_timestamp: Only trades after this timestamp
@@ -138,27 +216,9 @@ class PolymarketAPI:
         Returns:
             List of trade dicts
         """
-        try:
-            url = f"{self.rest_url}/trades"
-            params = {'limit': limit}
-
-            if since_timestamp:
-                params['after'] = since_timestamp
-
-            response = self.session.get(url, params=params, timeout=10)
-            response.raise_for_status()
-
-            trades = response.json()
-
-            if not isinstance(trades, list):
-                trades = []
-
-            logger.debug(f"Fetched {len(trades)} recent trades")
-            return trades
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error fetching recent trades: {e}")
-            return []
+        # Use Subgraph instead of CLOB API
+        logger.info("Fetching trades from Polymarket Subgraph...")
+        return self.get_trades_from_subgraph(limit, since_timestamp)
 
     @retry_with_backoff(max_retries=3, backoff_seconds=[1, 2, 4])
     def get_market_by_id(self, market_id: str) -> Optional[Dict]:
@@ -187,65 +247,118 @@ class PolymarketAPI:
         """
         Parse raw trade data into standardized format
 
+        Handles both CLOB API format and Subgraph format
+
         Args:
-            trade_raw: Raw trade data from API
+            trade_raw: Raw trade data from API or Subgraph
 
         Returns:
             Parsed trade dict or None if invalid
         """
         try:
+            # Detect format: Subgraph has 'fpmm' and 'creator', CLOB has 'taker_address'
+            is_subgraph = 'fpmm' in trade_raw or 'creator' in trade_raw
+
             # Extract trade ID
             trade_id = trade_raw.get('id') or trade_raw.get('trade_id')
             if not trade_id:
                 return None
 
             # Extract wallet address
-            wallet = (
-                trade_raw.get('taker_address') or
-                trade_raw.get('maker_address') or
-                trade_raw.get('address')
-            )
+            if is_subgraph:
+                # Subgraph format: creator.id
+                creator = trade_raw.get('creator', {})
+                wallet = creator.get('id') if isinstance(creator, dict) else None
+            else:
+                # CLOB format: taker_address, maker_address, or address
+                wallet = (
+                    trade_raw.get('taker_address') or
+                    trade_raw.get('maker_address') or
+                    trade_raw.get('address')
+                )
+
             if not wallet:
+                logger.debug(f"Trade {trade_id}: No wallet address found")
                 return None
 
-            # Extract bet size (in USDC, usually 6 decimals)
-            size_raw = (
-                trade_raw.get('size') or
-                trade_raw.get('amount') or
-                0
-            )
-            bet_size_usd = float(size_raw) / 1e6 if size_raw else 0
+            # Extract bet size
+            if is_subgraph:
+                # Subgraph format: collateralAmount in Wei (18 decimals)
+                collateral_raw = trade_raw.get('collateralAmount', 0)
+                try:
+                    bet_size_usd = float(collateral_raw) / 1e6  # USDC has 6 decimals
+                except:
+                    bet_size_usd = 0
+            else:
+                # CLOB format: size or amount (usually 6 decimals)
+                size_raw = (
+                    trade_raw.get('size') or
+                    trade_raw.get('amount') or
+                    0
+                )
+                bet_size_usd = float(size_raw) / 1e6 if size_raw else 0
 
             # Extract price/probability
-            price_raw = trade_raw.get('price', 0)
-            probability = float(price_raw) if price_raw else 0
+            if is_subgraph:
+                # Subgraph: calculate from outcomeTokensAmount / collateralAmount
+                outcome_tokens = float(trade_raw.get('outcomeTokensAmount', 0))
+                collateral = float(trade_raw.get('collateralAmount', 1))
+                if collateral > 0:
+                    probability = min(collateral / outcome_tokens, 1.0) if outcome_tokens > 0 else 0.5
+                else:
+                    probability = 0.5  # Default if we can't calculate
+            else:
+                # CLOB format: price field
+                price_raw = trade_raw.get('price', 0)
+                probability = float(price_raw) if price_raw else 0
 
-            # If price is in basis points (0-10000), convert to decimal
-            if probability > 1:
-                probability = probability / 10000
+                # If price is in basis points (0-10000), convert to decimal
+                if probability > 1:
+                    probability = probability / 10000
 
             # Extract market ID
-            market_id = (
-                trade_raw.get('market') or
-                trade_raw.get('market_id') or
-                trade_raw.get('asset_id')
-            )
+            if is_subgraph:
+                # Subgraph format: fpmm.condition.id
+                fpmm = trade_raw.get('fpmm', {})
+                condition = fpmm.get('condition', {}) if isinstance(fpmm, dict) else {}
+                market_id = condition.get('id') if isinstance(condition, dict) else None
+            else:
+                # CLOB format: market, market_id, or asset_id
+                market_id = (
+                    trade_raw.get('market') or
+                    trade_raw.get('market_id') or
+                    trade_raw.get('asset_id')
+                )
 
             # Extract outcome (YES/NO)
-            outcome = trade_raw.get('outcome') or trade_raw.get('side')
+            if is_subgraph:
+                # Subgraph: type is BUY or SELL
+                trade_type = trade_raw.get('type', '')
+                outcome = 'YES' if trade_type == 'Buy' else 'NO'
+            else:
+                outcome = trade_raw.get('outcome') or trade_raw.get('side')
 
             # Timestamp
-            ts_raw = trade_raw.get('timestamp') or trade_raw.get('created_at')
-            if ts_raw:
+            if is_subgraph:
+                # Subgraph: creationTimestamp (Unix timestamp)
+                ts_raw = trade_raw.get('creationTimestamp')
                 try:
-                    if isinstance(ts_raw, str):
-                        timestamp = datetime.fromisoformat(ts_raw.replace('Z', '+00:00'))
-                    else:
-                        timestamp = datetime.fromtimestamp(int(ts_raw))
+                    timestamp = datetime.fromtimestamp(int(ts_raw)) if ts_raw else datetime.utcnow()
                 except:
                     timestamp = datetime.utcnow()
             else:
-                timestamp = datetime.utcnow()
+                # CLOB: timestamp or created_at
+                ts_raw = trade_raw.get('timestamp') or trade_raw.get('created_at')
+                if ts_raw:
+                    try:
+                        if isinstance(ts_raw, str):
+                            timestamp = datetime.fromisoformat(ts_raw.replace('Z', '+00:00'))
+                        else:
+                            timestamp = datetime.fromtimestamp(int(ts_raw))
+                    except:
+                        timestamp = datetime.utcnow()
+                else:
+                    timestamp = datetime.utcnow()
 
             return {
                 'trade_id': str(trade_id),
