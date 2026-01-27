@@ -127,7 +127,8 @@ class PolymarketAPI:
     def get_trades_from_data_api(
         self,
         limit: int = 100,
-        since_timestamp: Optional[int] = None
+        since_timestamp: Optional[int] = None,
+        market_ids: Optional[List[str]] = None
     ) -> List[Dict]:
         """
         Get recent trades from Polymarket Data API (public, no auth required)
@@ -138,6 +139,7 @@ class PolymarketAPI:
         Args:
             limit: Number of trades to fetch (max 500)
             since_timestamp: Only trades after this timestamp (Unix timestamp in seconds)
+            market_ids: Optional list of market condition IDs to filter by (supports CSV)
 
         Returns:
             List of trade dicts from Data API
@@ -155,6 +157,16 @@ class PolymarketAPI:
             if since_timestamp:
                 params['after'] = since_timestamp
 
+            # Add market filter if specified
+            # Data API accepts comma-separated market IDs
+            if market_ids:
+                # Limit to reasonable number of markets to avoid URL length issues
+                if len(market_ids) > 100:
+                    logger.warning(f"Too many markets ({len(market_ids)}), limiting to first 100")
+                    market_ids = market_ids[:100]
+                params['market'] = ','.join(market_ids)
+                logger.debug(f"Filtering trades for {len(market_ids)} markets")
+
             response = self.session.get(url, params=params, timeout=15)
             response.raise_for_status()
 
@@ -164,7 +176,10 @@ class PolymarketAPI:
                 logger.error(f"Unexpected response format: {type(trades)}")
                 return []
 
-            logger.info(f"Fetched {len(trades)} trades from Data API")
+            if market_ids:
+                logger.info(f"Fetched {len(trades)} trades from {len(market_ids)} filtered markets")
+            else:
+                logger.info(f"Fetched {len(trades)} trades from Data API")
 
             return trades
 
@@ -179,23 +194,25 @@ class PolymarketAPI:
     def get_all_recent_trades(
         self,
         limit: int = 500,
-        since_timestamp: Optional[int] = None
+        since_timestamp: Optional[int] = None,
+        market_ids: Optional[List[str]] = None
     ) -> List[Dict]:
         """
-        Get recent trades across all markets
+        Get recent trades across all markets or specific markets
 
         Now uses Data API instead of CLOB API (which requires auth) or Subgraph (deprecated)
 
         Args:
             limit: Number of trades to fetch (max 500)
             since_timestamp: Only trades after this timestamp (Unix timestamp)
+            market_ids: Optional list of market condition IDs to filter by
 
         Returns:
             List of trade dicts
         """
         # Use Data API - public endpoint, no auth required
         logger.info("Fetching trades from Polymarket Data API...")
-        return self.get_trades_from_data_api(limit, since_timestamp)
+        return self.get_trades_from_data_api(limit, since_timestamp, market_ids)
 
     @retry_with_backoff(max_retries=3, backoff_seconds=[1, 2, 4])
     def get_market_by_id(self, market_id: str) -> Optional[Dict]:
@@ -273,11 +290,19 @@ class PolymarketAPI:
                 return None
 
             # Extract bet size
-            # Data API: 'size' field (6 decimals for USDC)
-            size_raw = trade_raw.get('size', 0)
-            if size_raw:
+            # Data API: 'usdcSize' field (already in USDC, no conversion needed)
+            # Docs: https://gist.github.com/shaunlebron/0dd3338f7dea06b8e9f8724981bb13bf
+            usdc_size = trade_raw.get('usdcSize')
+            if usdc_size is not None:
+                # Data API format: usdcSize is already in USDC (e.g., 354 = $354)
                 try:
-                    # Data API returns size in Wei (6 decimals for USDC)
+                    bet_size_usd = float(usdc_size)
+                except:
+                    bet_size_usd = 0
+            elif 'size' in trade_raw:
+                # Fallback: Try 'size' field (might be in wei with 6 decimals)
+                size_raw = trade_raw.get('size', 0)
+                try:
                     bet_size_usd = float(size_raw) / 1e6
                 except:
                     bet_size_usd = 0
@@ -371,17 +396,86 @@ class PolymarketAPI:
             logger.error(f"Error parsing trade: {e}")
             return None
 
+    def get_filtered_markets(
+        self,
+        high_risk_keywords: List[str],
+        exclude_keywords: List[str],
+        min_volume: float = 1000
+    ) -> List[Dict]:
+        """
+        Get active markets filtered by category keywords
+
+        Args:
+            high_risk_keywords: Keywords to include (Politics, Business, Tech, etc.)
+            exclude_keywords: Keywords to exclude (Sports, Crypto, etc.)
+            min_volume: Minimum market volume in USD
+
+        Returns:
+            List of filtered market dicts with condition IDs
+        """
+        try:
+            # Fetch active markets (fetch in batches if needed)
+            all_markets = []
+            offset = 0
+            batch_size = 100
+
+            while True:
+                markets = self.get_markets(limit=batch_size, offset=offset, active=True)
+                if not markets:
+                    break
+                all_markets.extend(markets)
+                offset += batch_size
+
+                # Stop if we got less than batch size (no more markets)
+                if len(markets) < batch_size:
+                    break
+
+                # Safety limit: max 500 markets
+                if len(all_markets) >= 500:
+                    break
+
+            logger.info(f"Fetched {len(all_markets)} total active markets")
+
+            # Filter by keywords
+            filtered_markets = []
+            for market in all_markets:
+                # Get market text fields
+                question = market.get('question', '').lower()
+                description = market.get('description', '').lower()
+                title = market.get('title', question).lower()  # Some APIs use 'title' instead
+                text = f"{question} {description} {title}"
+
+                # Check exclusions first
+                if any(keyword.lower() in text for keyword in exclude_keywords):
+                    continue
+
+                # Check inclusions
+                if any(keyword.lower() in text for keyword in high_risk_keywords):
+                    # Check volume threshold
+                    volume = float(market.get('volume', 0))
+                    if volume >= min_volume:
+                        filtered_markets.append(market)
+
+            logger.info(f"Filtered to {len(filtered_markets)} high-risk markets")
+            return filtered_markets
+
+        except Exception as e:
+            logger.error(f"Error filtering markets: {e}")
+            return []
+
     def scan_recent_trades(
         self,
         min_bet_size: float = 10000,
-        lookback_seconds: int = 300
+        lookback_seconds: int = 300,
+        market_ids: Optional[List[str]] = None
     ) -> List[Dict]:
         """
-        Scan for recent large trades
+        Scan for recent large trades, optionally filtered by markets
 
         Args:
             min_bet_size: Minimum bet size in USD
             lookback_seconds: How far back to look
+            market_ids: Optional list of market condition IDs to filter by
 
         Returns:
             List of parsed trades meeting criteria
@@ -390,7 +484,8 @@ class PolymarketAPI:
 
         raw_trades = self.get_all_recent_trades(
             limit=500,
-            since_timestamp=since_timestamp
+            since_timestamp=since_timestamp,
+            market_ids=market_ids
         )
 
         parsed_trades = []
@@ -399,7 +494,10 @@ class PolymarketAPI:
             if trade and trade['bet_size_usd'] >= min_bet_size:
                 parsed_trades.append(trade)
 
-        logger.info(f"Scanned {len(raw_trades)} trades, found {len(parsed_trades)} meeting size criteria")
+        if market_ids:
+            logger.info(f"Scanned {len(raw_trades)} trades from {len(market_ids)} filtered markets, found {len(parsed_trades)} meeting size criteria")
+        else:
+            logger.info(f"Scanned {len(raw_trades)} trades, found {len(parsed_trades)} meeting size criteria")
 
         return parsed_trades
 
