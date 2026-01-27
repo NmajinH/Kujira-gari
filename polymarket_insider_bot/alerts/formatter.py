@@ -1,9 +1,17 @@
 """
 Alert message formatting
 """
+import sys
 from typing import Dict
 from datetime import datetime
-from ..utils.helpers import truncate_address, format_usd, format_percentage
+from pathlib import Path
+
+# Fix imports
+if __package__:
+    from ..utils.helpers import truncate_address, format_usd, format_percentage
+else:
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+    from polymarket_insider_bot.utils.helpers import truncate_address, format_usd, format_percentage
 
 class AlertFormatter:
     """Formats alert messages for Telegram"""

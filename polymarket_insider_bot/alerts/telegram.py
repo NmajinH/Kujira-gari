@@ -3,11 +3,22 @@ Telegram bot client for sending alerts
 """
 from telegram import Bot
 from telegram.error import TelegramError
+import sys
 from typing import Dict, Optional
-from ..config import Config
-from ..utils.logger import setup_logger
-from ..utils.helpers import retry_with_backoff
-from .formatter import AlertFormatter
+from pathlib import Path
+
+# Fix imports
+if __package__:
+    from ..config import Config
+    from ..utils.logger import setup_logger
+    from ..utils.helpers import retry_with_backoff
+    from .formatter import AlertFormatter
+else:
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+    from polymarket_insider_bot.config import Config
+    from polymarket_insider_bot.utils.logger import setup_logger
+    from polymarket_insider_bot.utils.helpers import retry_with_backoff
+    from polymarket_insider_bot.alerts.formatter import AlertFormatter
 
 logger = setup_logger('telegram')
 

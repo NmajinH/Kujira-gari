@@ -1,12 +1,23 @@
 """
 Wallet profiling and analysis
 """
+import sys
 from typing import Dict, Optional, List
 from datetime import datetime
-from ..api.polygon import PolygonRPC
-from ..database.db import Database
-from ..config import Config
-from ..utils.logger import setup_logger
+from pathlib import Path
+
+# Fix imports
+if __package__:
+    from ..api.polygon import PolygonRPC
+    from ..database.db import Database
+    from ..config import Config
+    from ..utils.logger import setup_logger
+else:
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+    from polymarket_insider_bot.api.polygon import PolygonRPC
+    from polymarket_insider_bot.database.db import Database
+    from polymarket_insider_bot.config import Config
+    from polymarket_insider_bot.utils.logger import setup_logger
 
 logger = setup_logger('wallet_analyzer')
 

@@ -2,11 +2,21 @@
 Polygon blockchain RPC client for wallet analysis
 """
 from web3 import Web3
+import sys
 from typing import Dict, Optional, List
 from datetime import datetime, timedelta
-from ..config import Config
-from ..utils.logger import setup_logger
-from ..utils.helpers import retry_with_backoff
+from pathlib import Path
+
+# Fix imports
+if __package__:
+    from ..config import Config
+    from ..utils.logger import setup_logger
+    from ..utils.helpers import retry_with_backoff
+else:
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+    from polymarket_insider_bot.config import Config
+    from polymarket_insider_bot.utils.logger import setup_logger
+    from polymarket_insider_bot.utils.helpers import retry_with_backoff
 
 logger = setup_logger('polygon_rpc')
 

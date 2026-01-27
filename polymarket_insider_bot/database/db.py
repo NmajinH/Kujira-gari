@@ -7,10 +7,19 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 import json
+import sys
+from pathlib import Path
 
-from .models import Base, FlaggedTrade, WalletProfile, MarketOutcome, AlertHistory, SystemHealth
-from ..config import Config
-from ..utils.logger import setup_logger
+# Fix imports
+if __package__:
+    from .models import Base, FlaggedTrade, WalletProfile, MarketOutcome, AlertHistory, SystemHealth
+    from ..config import Config
+    from ..utils.logger import setup_logger
+else:
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+    from polymarket_insider_bot.database.models import Base, FlaggedTrade, WalletProfile, MarketOutcome, AlertHistory, SystemHealth
+    from polymarket_insider_bot.config import Config
+    from polymarket_insider_bot.utils.logger import setup_logger
 
 logger = setup_logger('database')
 

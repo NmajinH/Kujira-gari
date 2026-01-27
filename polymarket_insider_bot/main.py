@@ -3,18 +3,35 @@ Main orchestration for Polymarket Insider Trading Detection Bot
 """
 import time
 import sys
+import os
 from datetime import datetime, timedelta
 from typing import List, Dict
+from pathlib import Path
 
-from .config import Config
-from .utils.logger import setup_logger
-from .database.db import Database
-from .api.polymarket import PolymarketAPI
-from .api.polygon import PolygonRPC
-from .analyzers.market_analyzer import MarketAnalyzer
-from .analyzers.trade_analyzer import TradeAnalyzer
-from .analyzers.wallet_analyzer import WalletAnalyzer
-from .alerts.telegram import TelegramAlertBot
+# Fix imports to work when running directly or as module
+if __name__ == '__main__':
+    # Running directly: python main.py
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from polymarket_insider_bot.config import Config
+    from polymarket_insider_bot.utils.logger import setup_logger
+    from polymarket_insider_bot.database.db import Database
+    from polymarket_insider_bot.api.polymarket import PolymarketAPI
+    from polymarket_insider_bot.api.polygon import PolygonRPC
+    from polymarket_insider_bot.analyzers.market_analyzer import MarketAnalyzer
+    from polymarket_insider_bot.analyzers.trade_analyzer import TradeAnalyzer
+    from polymarket_insider_bot.analyzers.wallet_analyzer import WalletAnalyzer
+    from polymarket_insider_bot.alerts.telegram import TelegramAlertBot
+else:
+    # Running as module: python -m polymarket_insider_bot.main
+    from .config import Config
+    from .utils.logger import setup_logger
+    from .database.db import Database
+    from .api.polymarket import PolymarketAPI
+    from .api.polygon import PolygonRPC
+    from .analyzers.market_analyzer import MarketAnalyzer
+    from .analyzers.trade_analyzer import TradeAnalyzer
+    from .analyzers.wallet_analyzer import WalletAnalyzer
+    from .alerts.telegram import TelegramAlertBot
 
 logger = setup_logger('main', Config.LOG_LEVEL)
 
