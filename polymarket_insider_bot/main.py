@@ -73,37 +73,23 @@ class InsiderDetectionBot:
     def scan_and_analyze(self):
         """
         Main scanning loop iteration:
-        1. Filter relevant markets
-        2. Fetch recent trades from those markets
-        3. Analyze and send alerts
+        DEBUG MODE: Fetch ALL trades without market filtering to test Data API
+
+        1. Fetch recent trades (NO FILTERING)
+        2. Analyze and send alerts
         """
         logger.info("Starting scan cycle...")
 
         try:
-            # Get filtered markets by category (only high-risk markets)
-            logger.info("Filtering markets by category...")
-            filtered_markets = self.polymarket.get_filtered_markets(
-                high_risk_keywords=Config.HIGH_RISK_KEYWORDS,
-                exclude_keywords=Config.EXCLUDE_KEYWORDS,
-                min_volume=1000  # $1k minimum volume
-            )
+            # DEBUG: Skip market filtering completely
+            logger.info("⚠️  DEBUG MODE: Fetching ALL trades without market filtering")
 
-            if not filtered_markets:
-                logger.warning("No filtered markets found - check keyword configuration")
-                return
-
-            # Extract condition IDs
-            market_ids = [m.get('condition_id') or m.get('conditionId') for m in filtered_markets]
-            market_ids = [mid for mid in market_ids if mid]  # Remove None values
-
-            logger.info(f"Monitoring {len(market_ids)} high-risk markets")
-
-            # Get recent trades from filtered markets only
+            # Get recent trades from ALL markets (no filtering)
             lookback_seconds = Config.SCAN_INTERVAL_SECONDS
             trades = self.polymarket.scan_recent_trades(
                 min_bet_size=Config.MIN_BET_SIZE_USD,
                 lookback_seconds=lookback_seconds,
-                market_ids=market_ids
+                market_ids=None  # DEBUG: No market filter
             )
 
             logger.info(f"Found {len(trades)} trades meeting size criteria")
