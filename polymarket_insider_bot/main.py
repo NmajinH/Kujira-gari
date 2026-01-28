@@ -48,7 +48,13 @@ class InsiderDetectionBot:
             Config.validate()
 
             # Initialize components
-            self.db = Database()
+            try:
+                self.db = Database()
+                logger.info("Database initialized")
+            except Exception as e:
+                logger.warning(f"Database initialization failed: {e} - Continuing without database")
+                self.db = None
+
             self.polymarket = PolymarketAPI()
             self.polygon_rpc = PolygonRPC()
             self.telegram = TelegramAlertBot()
@@ -119,13 +125,17 @@ class InsiderDetectionBot:
 
             logger.debug(f"Processing trade {trade_id}")
 
-            # Check if already processed
-            with self.db.get_session() as session:
-                from .database.models import FlaggedTrade
-                existing = session.query(FlaggedTrade).filter_by(trade_id=trade_id).first()
-                if existing:
-                    logger.debug(f"Trade {trade_id} already processed")
-                    return
+            # Check if already processed (if database available)
+            if self.db:
+                try:
+                    with self.db.get_session() as session:
+                        from .database.models import FlaggedTrade
+                        existing = session.query(FlaggedTrade).filter_by(trade_id=trade_id).first()
+                        if existing:
+                            logger.debug(f"Trade {trade_id} already processed")
+                            return
+                except Exception as e:
+                    logger.debug(f"Database check failed (continuing anyway): {e}")
 
             # Get market info
             market_info = self.get_market_info(market_id)
@@ -238,6 +248,10 @@ class InsiderDetectionBot:
             market_info: Market information
             market_category: Market category
         """
+        if not self.db:
+            logger.debug("Database not available, skipping save")
+            return
+
         try:
             self.db.save_flagged_trade(
                 trade_id=trade['trade_id'],
@@ -298,20 +312,26 @@ class InsiderDetectionBot:
                 market_info=market_info
             ))
 
-            # Save alert history
-            self.db.save_alert(
-                alert_tier=alert_tier,
-                wallet_address=trade['wallet_address'],
-                market_id=trade['market_id'],
-                trade_id=trade['trade_id'],
-                message="Alert sent",
-                suspicion_score=analysis['score'],
-                sent_successfully=success
-            )
+            # Save alert history (if database available)
+            if self.db:
+                try:
+                    self.db.save_alert(
+                        alert_tier=alert_tier,
+                        wallet_address=trade['wallet_address'],
+                        market_id=trade['market_id'],
+                        trade_id=trade['trade_id'],
+                        message="Alert sent",
+                        suspicion_score=analysis['score'],
+                        sent_successfully=success
+                    )
+
+                    if success:
+                        self.db.mark_alert_sent(trade['trade_id'])
+                except Exception as e:
+                    logger.warning(f"Database error (non-critical): {e}")
 
             if success:
                 self.alerts_sent += 1
-                self.db.mark_alert_sent(trade['trade_id'])
 
         except Exception as e:
             logger.error(f"Error sending alert: {e}")
@@ -346,14 +366,18 @@ class InsiderDetectionBot:
                 'uptime_seconds': int(uptime_seconds),
                 'markets_tracked': len(self.markets_cache),
                 'trades_scanned': self.trades_scanned,
-                'alerts_sent_today': self.db.get_alerts_sent_today(),
+                'alerts_sent_today': self.db.get_alerts_sent_today() if self.db else self.alerts_sent,
                 'polymarket_status': True,
                 'polygon_status': self.polygon_rpc.w3.is_connected(),
                 'telegram_status': True
             }
 
-            # Save to database
-            self.db.save_health_check(health_data)
+            # Save to database (if available)
+            if self.db:
+                try:
+                    self.db.save_health_check(health_data)
+                except Exception as e:
+                    logger.warning(f"Failed to save health check to database: {e}")
 
             # Send to Telegram (async)
             asyncio.run(self.telegram.send_health_check(health_data))
@@ -387,12 +411,14 @@ class InsiderDetectionBot:
 
         # Check 2: Database
         print("[2/5] Initializing database...")
-        try:
-            stats = self.db.get_statistics()
-            print(f"  ✅ Database ready ({stats['total_flagged']} trades logged)\n")
-        except Exception as e:
-            print(f"  ❌ Database error: {e}\n")
-            return False
+        if self.db:
+            try:
+                stats = self.db.get_statistics()
+                print(f"  ✅ Database ready ({stats['total_flagged']} trades logged)\n")
+            except Exception as e:
+                print(f"  ⚠️  Database error: {e} (will continue without database)\n")
+        else:
+            print(f"  ⚠️  Database not available (continuing without persistence)\n")
 
         # Check 3: Telegram
         print("[3/5] Testing Telegram connection...")
