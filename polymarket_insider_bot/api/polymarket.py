@@ -261,6 +261,11 @@ class PolymarketAPI:
             Parsed trade dict or None if invalid
         """
         try:
+            # DEBUG: Log first trade to see actual format
+            if not hasattr(self, '_logged_first_trade'):
+                logger.info(f"🔍 DEBUG - First trade raw data: {trade_raw}")
+                self._logged_first_trade = True
+
             # Extract trade ID
             trade_id = trade_raw.get('id') or trade_raw.get('trade_id')
             if not trade_id:
@@ -292,11 +297,19 @@ class PolymarketAPI:
             # Extract bet size
             # Data API: 'usdcSize' field (already in USDC, no conversion needed)
             # Docs: https://gist.github.com/shaunlebron/0dd3338f7dea06b8e9f8724981bb13bf
+
+            # DEBUG: Log what size fields are available
+            if not hasattr(self, '_logged_size_fields'):
+                size_fields = {k: v for k, v in trade_raw.items() if 'size' in k.lower() or 'amount' in k.lower()}
+                logger.info(f"🔍 DEBUG - Available size/amount fields: {size_fields}")
+                self._logged_size_fields = True
+
             usdc_size = trade_raw.get('usdcSize')
             if usdc_size is not None:
                 # Data API format: usdcSize is already in USDC (e.g., 354 = $354)
                 try:
                     bet_size_usd = float(usdc_size)
+                    logger.debug(f"Trade {trade_id}: Using usdcSize={usdc_size} → ${bet_size_usd}")
                 except:
                     bet_size_usd = 0
             elif 'size' in trade_raw:
@@ -304,6 +317,7 @@ class PolymarketAPI:
                 size_raw = trade_raw.get('size', 0)
                 try:
                     bet_size_usd = float(size_raw) / 1e6
+                    logger.debug(f"Trade {trade_id}: Using size={size_raw} / 1e6 → ${bet_size_usd}")
                 except:
                     bet_size_usd = 0
             elif 'collateralAmount' in trade_raw:
@@ -311,10 +325,12 @@ class PolymarketAPI:
                 collateral_raw = trade_raw.get('collateralAmount', 0)
                 try:
                     bet_size_usd = float(collateral_raw) / 1e6
+                    logger.debug(f"Trade {trade_id}: Using collateralAmount={collateral_raw} / 1e6 → ${bet_size_usd}")
                 except:
                     bet_size_usd = 0
             else:
                 bet_size_usd = 0
+                logger.warning(f"Trade {trade_id}: No size field found!")
 
             # Extract price/probability
             # Data API: 'price' field (0-1 decimal)
