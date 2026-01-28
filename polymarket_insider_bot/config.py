@@ -48,8 +48,8 @@ class Config:
     LOW_TRADE_COUNT = 10
     FRESH_FUNDING_HOURS = 48
 
-    # High-risk market categories (keywords for matching)
-    HIGH_RISK_CATEGORIES = [
+    # High-risk market keywords (for category filtering)
+    HIGH_RISK_KEYWORDS = [
         # Politics & Geopolitics
         'election', 'president', 'prime minister', 'senate', 'congress',
         'vote', 'ballot', 'campaign', 'cabinet', 'minister', 'governor',
@@ -76,6 +76,23 @@ class Config:
         'sec', 'fda', 'approve', 'approval', 'regulation',
         'court', 'ruling', 'verdict', 'judge', 'legal',
         'lawsuit', 'settlement', 'indictment', 'trial'
+    ]
+
+    # Exclude keywords (filter out sports/crypto/entertainment)
+    EXCLUDE_KEYWORDS = [
+        # Sports
+        'football', 'basketball', 'soccer', 'baseball', 'cricket',
+        'tennis', 'golf', 'ufc', 'boxing', 'nfl', 'nba', 'mlb',
+        'nhl', 'fifa', 'super bowl', 'world cup', 'olympics',
+        'championship', 'playoff', 'quarterback', 'touchdown',
+
+        # Crypto price predictions
+        'bitcoin', 'btc', 'ethereum', 'eth', 'crypto price',
+        'coin price', 'will btc hit', 'will eth hit',
+
+        # General entertainment (unless awards-related)
+        'movie box office', 'album sales', 'streaming',
+        'youtube views', 'tiktok', 'instagram followers'
     ]
 
     # Retry configuration
