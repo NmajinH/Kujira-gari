@@ -4,6 +4,7 @@ Main orchestration for Polymarket Insider Trading Detection Bot
 import time
 import sys
 import os
+import asyncio
 from datetime import datetime, timedelta
 from typing import List, Dict
 from pathlib import Path
@@ -344,7 +345,6 @@ class InsiderDetectionBot:
                 'status': 'online',
                 'uptime_seconds': int(uptime_seconds),
                 'markets_tracked': len(self.markets_cache),
-                'last_scan': self.last_scan_time.strftime('%Y-%m-%d %H:%M:%S') if self.last_scan_time else 'Never',
                 'trades_scanned': self.trades_scanned,
                 'alerts_sent_today': self.db.get_alerts_sent_today(),
                 'polymarket_status': True,
@@ -397,7 +397,7 @@ class InsiderDetectionBot:
         # Check 3: Telegram
         print("[3/5] Testing Telegram connection...")
         try:
-            if self.telegram.test_connection():
+            if asyncio.run(self.telegram.test_connection()):
                 print("  ✅ Telegram connected\n")
             else:
                 print("  ⚠️  Telegram connection issue (will continue)\n")

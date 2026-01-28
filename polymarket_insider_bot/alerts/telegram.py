@@ -167,7 +167,7 @@ class TelegramAlertBot:
             logger.error(f"Failed to send health check: {e}")
             return False
 
-    def test_connection(self) -> bool:
+    async def test_connection(self) -> bool:
         """
         Test Telegram bot connection
 
@@ -175,7 +175,7 @@ class TelegramAlertBot:
             True if connection works
         """
         try:
-            bot_info = self.bot.get_me()
+            bot_info = await self.bot.get_me()
             logger.info(f"Connected to Telegram bot: @{bot_info.username}")
 
             if self.chat_id:

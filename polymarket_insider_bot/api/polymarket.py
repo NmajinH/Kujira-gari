@@ -264,6 +264,7 @@ class PolymarketAPI:
             # Extract trade ID
             trade_id = trade_raw.get('id') or trade_raw.get('trade_id')
             if not trade_id:
+                logger.debug(f"❌ Parse failed: No trade ID found in {list(trade_raw.keys())}")
                 return None
 
             # Extract wallet address
@@ -286,7 +287,7 @@ class PolymarketAPI:
                 wallet = trade_raw['address']
 
             if not wallet:
-                logger.debug(f"Trade {trade_id}: No wallet address found")
+                logger.debug(f"❌ Parse failed for trade {trade_id}: No wallet address found. Available fields: {list(trade_raw.keys())}")
                 return None
 
             # Extract bet size from Data API
@@ -492,6 +493,12 @@ class PolymarketAPI:
             since_timestamp=since_timestamp,
             market_ids=market_ids
         )
+
+        # DEBUG: Log sample raw trade
+        if raw_trades:
+            import json
+            logger.info(f"📊 Sample raw trade structure:")
+            logger.info(json.dumps(raw_trades[0], indent=2))
 
         logger.info(f"🔍 FILTER DEBUG: Checking {len(raw_trades)} raw trades against MIN_BET_SIZE=${min_bet_size}")
 
