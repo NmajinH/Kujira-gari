@@ -493,11 +493,36 @@ class PolymarketAPI:
             market_ids=market_ids
         )
 
+        logger.info(f"🔍 FILTER DEBUG: Checking {len(raw_trades)} raw trades against MIN_BET_SIZE=${min_bet_size}")
+
         parsed_trades = []
-        for raw_trade in raw_trades:
+        failed_parse = 0
+        failed_size = 0
+
+        for i, raw_trade in enumerate(raw_trades):
             trade = self.parse_trade(raw_trade)
-            if trade and trade['bet_size_usd'] >= min_bet_size:
+
+            if not trade:
+                failed_parse += 1
+                continue
+
+            # DEBUG: Log first 5 trades
+            if i < 5:
+                passes = trade['bet_size_usd'] >= min_bet_size
+                logger.info(f"  Trade {i+1}: size=${trade['bet_size_usd']:.2f}, passes size filter? {'YES' if passes else 'NO'} (threshold=${min_bet_size})")
+
+            if trade['bet_size_usd'] >= min_bet_size:
                 parsed_trades.append(trade)
+            else:
+                failed_size += 1
+
+        # Summary logging
+        logger.info(f"📊 FILTER RESULTS:")
+        logger.info(f"   - Total raw trades: {len(raw_trades)}")
+        logger.info(f"   - Failed to parse: {failed_parse}")
+        logger.info(f"   - Parsed successfully: {len(raw_trades) - failed_parse}")
+        logger.info(f"   - Failed size filter (<${min_bet_size}): {failed_size}")
+        logger.info(f"   - PASSED all filters: {len(parsed_trades)}")
 
         if market_ids:
             logger.info(f"Scanned {len(raw_trades)} trades from {len(market_ids)} filtered markets, found {len(parsed_trades)} meeting size criteria")
