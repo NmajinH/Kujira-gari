@@ -262,29 +262,30 @@ class PolymarketAPI:
         """
         try:
             # Extract trade ID
-            trade_id = trade_raw.get('id') or trade_raw.get('trade_id')
+            # Data API doesn't always have 'id', use transactionHash or generate from available fields
+            trade_id = (
+                trade_raw.get('id') or
+                trade_raw.get('transactionHash') or
+                trade_raw.get('trade_id') or
+                f"{trade_raw.get('proxyWallet', 'unknown')[:10]}_{trade_raw.get('timestamp', 0)}"
+            )
+
             if not trade_id:
                 logger.debug(f"❌ Parse failed: No trade ID found in {list(trade_raw.keys())}")
                 return None
 
             # Extract wallet address
-            # Data API: 'user' field (if available), otherwise 'proxyWallet'
-            # Legacy: 'creator.id', 'taker_address', 'maker_address', 'address'
-            wallet = None
-            if 'user' in trade_raw:
-                wallet = trade_raw['user']
-            elif 'proxyWallet' in trade_raw:
-                wallet = trade_raw['proxyWallet']
-            elif 'creator' in trade_raw:
-                # Legacy Subgraph format
+            # Data API: 'proxyWallet' is the primary field
+            wallet = (
+                trade_raw.get('proxyWallet') or
+                trade_raw.get('user') or
+                trade_raw.get('address')
+            )
+
+            # Legacy formats (Subgraph, CLOB)
+            if not wallet and 'creator' in trade_raw:
                 creator = trade_raw['creator']
                 wallet = creator.get('id') if isinstance(creator, dict) else creator
-            elif 'taker_address' in trade_raw:
-                wallet = trade_raw['taker_address']
-            elif 'maker_address' in trade_raw:
-                wallet = trade_raw['maker_address']
-            elif 'address' in trade_raw:
-                wallet = trade_raw['address']
 
             if not wallet:
                 logger.debug(f"❌ Parse failed for trade {trade_id}: No wallet address found. Available fields: {list(trade_raw.keys())}")
@@ -342,21 +343,20 @@ class PolymarketAPI:
                 probability = 0.5
 
             # Extract market ID
-            # Data API: 'conditionId' field
-            market_id = trade_raw.get('conditionId')
-            if not market_id:
-                # Try other field names
-                if 'fpmm' in trade_raw:
-                    # Legacy Subgraph format
-                    fpmm = trade_raw['fpmm']
-                    condition = fpmm.get('condition', {}) if isinstance(fpmm, dict) else {}
-                    market_id = condition.get('id') if isinstance(condition, dict) else None
-                else:
-                    market_id = (
-                        trade_raw.get('market') or
-                        trade_raw.get('market_id') or
-                        trade_raw.get('asset_id')
-                    )
+            # Data API: 'conditionId', 'asset', or use 'slug' as fallback
+            market_id = (
+                trade_raw.get('conditionId') or
+                trade_raw.get('asset') or
+                trade_raw.get('market') or
+                trade_raw.get('market_id') or
+                trade_raw.get('slug')  # Fallback to slug if no condition ID
+            )
+
+            # Legacy Subgraph format
+            if not market_id and 'fpmm' in trade_raw:
+                fpmm = trade_raw['fpmm']
+                condition = fpmm.get('condition', {}) if isinstance(fpmm, dict) else {}
+                market_id = condition.get('id') if isinstance(condition, dict) else None
 
             # Extract outcome/side
             # Data API: 'side' field (BUY/SELL)
