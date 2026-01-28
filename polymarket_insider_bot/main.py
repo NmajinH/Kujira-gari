@@ -289,14 +289,14 @@ class InsiderDetectionBot:
                 # TODO: Implement batching
                 return
 
-            # Send alert
-            success = self.telegram.send_alert(
+            # Send alert (async)
+            success = asyncio.run(self.telegram.send_alert(
                 alert_tier=alert_tier,
                 trade_data=trade,
                 analysis=analysis,
                 wallet_profile=wallet_profile,
                 market_info=market_info
-            )
+            ))
 
             # Save alert history
             self.db.save_alert(
@@ -326,13 +326,13 @@ class InsiderDetectionBot:
         error_msg = f"Scan error: {str(error)}"
         logger.error(error_msg)
 
-        # Send error alert to Telegram
+        # Send error alert to Telegram (async)
         try:
-            self.telegram.send_error_alert(
+            asyncio.run(self.telegram.send_error_alert(
                 error_type="Scan Error",
                 error_message=str(error),
                 context="Error occurred during market scanning cycle"
-            )
+            ))
         except:
             logger.error("Failed to send error alert")
 
@@ -355,8 +355,8 @@ class InsiderDetectionBot:
             # Save to database
             self.db.save_health_check(health_data)
 
-            # Send to Telegram
-            self.telegram.send_health_check(health_data)
+            # Send to Telegram (async)
+            asyncio.run(self.telegram.send_health_check(health_data))
 
             logger.info("Health check completed and sent")
 
@@ -479,11 +479,11 @@ class InsiderDetectionBot:
             logger.info("\nBot stopped by user")
         except Exception as e:
             logger.error(f"Bot crashed: {e}")
-            self.telegram.send_error_alert(
+            asyncio.run(self.telegram.send_error_alert(
                 error_type="Bot Crash",
                 error_message=str(e),
                 context="Bot encountered fatal error and stopped"
-            )
+            ))
             raise
 
 

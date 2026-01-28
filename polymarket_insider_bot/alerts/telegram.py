@@ -3,6 +3,7 @@ Telegram bot client for sending alerts
 """
 from telegram import Bot
 from telegram.error import TelegramError
+import asyncio
 import sys
 from typing import Dict, Optional
 from pathlib import Path
@@ -52,7 +53,7 @@ class TelegramAlertBot:
         backoff_seconds=[1, 2, 4],
         exceptions=(TelegramError,)
     )
-    def send_message(self, message: str, parse_mode: str = None) -> bool:
+    async def send_message(self, message: str, parse_mode: str = None) -> bool:
         """
         Send message to configured chat
 
@@ -68,7 +69,7 @@ class TelegramAlertBot:
             return False
 
         try:
-            self.bot.send_message(
+            await self.bot.send_message(
                 chat_id=self.chat_id,
                 text=message,
                 parse_mode=parse_mode,
@@ -81,7 +82,7 @@ class TelegramAlertBot:
             logger.error(f"Failed to send Telegram message: {e}")
             raise
 
-    def send_alert(
+    async def send_alert(
         self,
         alert_tier: str,
         trade_data: Dict,
@@ -111,7 +112,7 @@ class TelegramAlertBot:
                 market_info=market_info
             )
 
-            success = self.send_message(message)
+            success = await self.send_message(message)
 
             if success:
                 logger.info(f"Sent {alert_tier} alert for trade {trade_data.get('trade_id')}")
@@ -122,7 +123,7 @@ class TelegramAlertBot:
             logger.error(f"Error sending alert: {e}")
             return False
 
-    def send_error_alert(
+    async def send_error_alert(
         self,
         error_type: str,
         error_message: str,
@@ -143,13 +144,13 @@ class TelegramAlertBot:
             message = self.formatter.format_error_alert(
                 error_type, error_message, context
             )
-            return self.send_message(message)
+            return await self.send_message(message)
 
         except Exception as e:
             logger.error(f"Failed to send error alert: {e}")
             return False
 
-    def send_health_check(self, health_data: Dict) -> bool:
+    async def send_health_check(self, health_data: Dict) -> bool:
         """
         Send health check message
 
@@ -161,7 +162,7 @@ class TelegramAlertBot:
         """
         try:
             message = self.formatter.format_health_check(health_data)
-            return self.send_message(message)
+            return await self.send_message(message)
 
         except Exception as e:
             logger.error(f"Failed to send health check: {e}")

@@ -30,13 +30,13 @@ class Config:
     # Logging
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 
-    # Scanning
-    SCAN_INTERVAL_SECONDS = int(os.getenv('SCAN_INTERVAL_SECONDS', 300))
-    MIN_BET_SIZE_USD = float(os.getenv('MIN_BET_SIZE_USD', 10000))
-    MAX_PROBABILITY = float(os.getenv('MAX_PROBABILITY', 0.20))
+    # Scanning - TESTING MODE (ultra-sensitive)
+    SCAN_INTERVAL_SECONDS = int(os.getenv('SCAN_INTERVAL_SECONDS', 60))  # 1 minute for fast testing
+    MIN_BET_SIZE_USD = float(os.getenv('MIN_BET_SIZE_USD', 50))  # $50 to catch almost everything
+    MAX_PROBABILITY = float(os.getenv('MAX_PROBABILITY', 0.95))  # 95% - accept nearly any odds
 
-    # Alert Configuration
-    MIN_ALERT_SCORE = int(os.getenv('MIN_ALERT_SCORE', 50))
+    # Alert Configuration - TESTING MODE (alert on everything)
+    MIN_ALERT_SCORE = int(os.getenv('MIN_ALERT_SCORE', 1))  # Score of 1+ triggers alerts
     BATCH_MEDIUM_ALERTS = os.getenv('BATCH_MEDIUM_ALERTS', 'false').lower() == 'true'
 
     # Market filters
