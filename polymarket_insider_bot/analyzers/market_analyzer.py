@@ -21,7 +21,7 @@ class MarketAnalyzer:
     """Analyzes and categorizes Polymarket markets"""
 
     def __init__(self):
-        self.high_risk_keywords = [kw.lower() for kw in Config.HIGH_RISK_CATEGORIES]
+        self.high_risk_keywords = [kw.lower() for kw in Config.HIGH_RISK_KEYWORDS]
 
     def is_high_risk_category(self, market_name: str, market_description: str = "") -> bool:
         """
