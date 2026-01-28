@@ -261,11 +261,6 @@ class PolymarketAPI:
             Parsed trade dict or None if invalid
         """
         try:
-            # DEBUG: Log first trade to see actual format
-            if not hasattr(self, '_logged_first_trade'):
-                logger.info(f"🔍 DEBUG - First trade raw data: {trade_raw}")
-                self._logged_first_trade = True
-
             # Extract trade ID
             trade_id = trade_raw.get('id') or trade_raw.get('trade_id')
             if not trade_id:
@@ -294,38 +289,32 @@ class PolymarketAPI:
                 logger.debug(f"Trade {trade_id}: No wallet address found")
                 return None
 
-            # Extract bet size
-            # Data API: 'usdcSize' field (already in USDC, no conversion needed)
-            # Docs: https://gist.github.com/shaunlebron/0dd3338f7dea06b8e9f8724981bb13bf
+            # Extract bet size from Data API
+            # Data API returns 'size' field already in USD (e.g., 5.36842 = $5.36)
 
-            # DEBUG: Log what size fields are available
-            if not hasattr(self, '_logged_size_fields'):
-                size_fields = {k: v for k, v in trade_raw.items() if 'size' in k.lower() or 'amount' in k.lower()}
-                logger.info(f"🔍 DEBUG - Available size/amount fields: {size_fields}")
-                self._logged_size_fields = True
-
-            usdc_size = trade_raw.get('usdcSize')
-            if usdc_size is not None:
-                # Data API format: usdcSize is already in USDC (e.g., 354 = $354)
+            # Data API 'size' field is ALREADY in USD - no conversion needed!
+            # Example: 'size': 5.36842 = $5.36 USD (not wei format)
+            size_raw = trade_raw.get('size')
+            if size_raw is not None:
                 try:
-                    bet_size_usd = float(usdc_size)
-                    logger.debug(f"Trade {trade_id}: Using usdcSize={usdc_size} → ${bet_size_usd}")
+                    bet_size_usd = float(size_raw)
+                    if not hasattr(self, '_logged_size_conversion'):
+                        logger.info(f"✅ Size parsing: {size_raw} → ${bet_size_usd} USD (direct, no conversion)")
+                        self._logged_size_conversion = True
                 except:
                     bet_size_usd = 0
-            elif 'size' in trade_raw:
-                # Fallback: Try 'size' field (might be in wei with 6 decimals)
-                size_raw = trade_raw.get('size', 0)
+            elif 'usdcSize' in trade_raw:
+                # Alternative field name
+                usdc_size = trade_raw.get('usdcSize')
                 try:
-                    bet_size_usd = float(size_raw) / 1e6
-                    logger.debug(f"Trade {trade_id}: Using size={size_raw} / 1e6 → ${bet_size_usd}")
+                    bet_size_usd = float(usdc_size)
                 except:
                     bet_size_usd = 0
             elif 'collateralAmount' in trade_raw:
-                # Legacy Subgraph format
+                # Legacy Subgraph format (6 decimals)
                 collateral_raw = trade_raw.get('collateralAmount', 0)
                 try:
                     bet_size_usd = float(collateral_raw) / 1e6
-                    logger.debug(f"Trade {trade_id}: Using collateralAmount={collateral_raw} / 1e6 → ${bet_size_usd}")
                 except:
                     bet_size_usd = 0
             else:
