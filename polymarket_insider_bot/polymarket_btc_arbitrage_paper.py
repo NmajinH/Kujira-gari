@@ -205,63 +205,97 @@ class TradeLog:
 
 
 # ---------------------------------------------------------------------------
-# Market Scanner
+# Market Scanner — slug-based lookup for recurring 15-min markets
 # ---------------------------------------------------------------------------
 
+GAMMA_URL = Config.POLYMARKET_GAMMA_URL
+
+# BTC 15-min markets follow this slug pattern:
+#   btc-updown-15m-{unix_ts}
+# where unix_ts = floor(time.time() / 900) * 900  (900s = 15 min)
+INTERVAL = 900  # seconds
+
+
+def _current_slugs(coin="btc"):
+    """Return slugs for the previous, current, and next 15-min windows."""
+    ts = int(time.time() // INTERVAL) * INTERVAL
+    return [
+        f"{coin}-updown-15m-{ts - INTERVAL}",
+        f"{coin}-updown-15m-{ts}",
+        f"{coin}-updown-15m-{ts + INTERVAL}",
+    ]
+
+
 class ArbitrageScanner:
-    """Queries Gamma API for active BTC 15-min markets and their prices."""
+    """Queries Gamma API for active BTC 15-min markets by computed slug."""
 
     def __init__(self):
-        self.gamma_url = Config.POLYMARKET_GAMMA_URL
-        self.tracked = {}  # id -> parsed market dict
+        self.tracked = {}  # market_id -> parsed dict
+        self._seen_slugs = set()
 
     def scan(self):
-        """Fetch markets, filter for 15-min BTC, return new matches."""
-        try:
-            resp = requests.get(
-                f"{self.gamma_url}/markets",
-                params={"active": "true", "closed": "false", "limit": 100},
-                timeout=15,
-            )
-            resp.raise_for_status()
-            markets = resp.json()
-        except requests.RequestException as e:
-            print(f"[SCANNER ERROR] {e}")
-            return []
-
-        crypto_kw = ["btc", "bitcoin", "crypto"]
-        time_kw = ["15 min", "15min", "15-min", "15 minute"]
+        """Fetch current/adjacent 15-min events by slug, extract markets."""
+        slugs = _current_slugs("btc")
         found = []
 
-        for raw in markets:
-            q = (raw.get("question") or "").lower()
-            d = (raw.get("description") or "").lower()
-            blob = q + " " + d
+        for slug in slugs:
+            if slug in self._seen_slugs:
+                continue
 
-            is_crypto = any(k in blob for k in crypto_kw)
-            is_15 = any(k in blob for k in time_kw)
+            url = f"{GAMMA_URL}/events/slug/{slug}"
+            print(f"[DEBUG] GET {url}")
 
-            keep = False
-            if is_crypto and is_15:
-                keep = True
-            elif is_crypto and "price" in blob:
-                end_s = raw.get("end_date_iso") or raw.get("endDate")
-                if end_s:
-                    try:
-                        end = datetime.fromisoformat(end_s.replace("Z", "+00:00"))
-                        left = (end - datetime.now(timezone.utc)).total_seconds()
-                        if 0 < left < 1200:
-                            keep = True
-                    except (ValueError, TypeError):
-                        pass
+            try:
+                resp = requests.get(url, timeout=15)
+                print(f"[DEBUG] Status: {resp.status_code}")
+            except requests.RequestException as e:
+                print(f"[DEBUG] Request failed: {e}")
+                continue
 
-            if keep:
-                parsed = self._parse(raw)
-                if parsed:
-                    self.tracked[parsed["id"]] = parsed
-                    found.append(parsed)
+            if resp.status_code == 404:
+                print(f"[DEBUG] Slug not found (not created yet): {slug}")
+                continue
+            if resp.status_code != 200:
+                print(f"[DEBUG] Unexpected status {resp.status_code}")
+                continue
 
-        # prune expired (>5 min past close)
+            data = resp.json()
+
+            # Debug: show raw event structure
+            title = data.get("title") or data.get("slug") or "?"
+            closed = data.get("closed")
+            active = data.get("active")
+            markets_raw = data.get("markets", [])
+            print(f"[DEBUG] Event: {title}")
+            print(f"[DEBUG]   active={active}  closed={closed}  "
+                  f"markets_count={len(markets_raw)}")
+
+            for mkt_raw in markets_raw:
+                parsed = self._parse(mkt_raw)
+                if not parsed:
+                    continue
+
+                print(f"[DEBUG]   Market: {parsed['question']}")
+                print(f"[DEBUG]     id={parsed['id']}")
+                print(f"[DEBUG]     YES=${parsed['yes_price']}  "
+                      f"NO=${parsed['no_price']}")
+                end_s = (
+                    parsed["end_time"].isoformat()
+                    if parsed["end_time"] else "None"
+                )
+                print(f"[DEBUG]     end_time={end_s}")
+
+                if parsed["yes_price"] is not None and parsed["no_price"] is not None:
+                    combo = parsed["yes_price"] + parsed["no_price"]
+                    print(f"[DEBUG]     combined=${combo:.4f}  "
+                          f"(threshold <${ARB_THRESHOLD})")
+
+                self.tracked[parsed["id"]] = parsed
+                found.append(parsed)
+
+            self._seen_slugs.add(slug)
+
+        # Prune expired (>5 min past close)
         now = datetime.now(timezone.utc)
         gone = [
             k for k, v in self.tracked.items()
@@ -269,40 +303,27 @@ class ArbitrageScanner:
         ]
         for k in gone:
             del self.tracked[k]
+        # Also allow re-scanning slugs whose window has fully passed
+        ts_cutoff = int(time.time() // INTERVAL) * INTERVAL - INTERVAL * 2
+        self._seen_slugs = {
+            s for s in self._seen_slugs
+            if int(s.rsplit("-", 1)[-1]) >= ts_cutoff
+        }
 
         return found
-
-    def refresh_prices(self, market_id):
-        """Re-fetch a single market's prices from the API."""
-        try:
-            resp = requests.get(
-                f"{self.gamma_url}/markets/{market_id}",
-                timeout=10,
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                parsed = self._parse(data)
-                if parsed:
-                    self.tracked[parsed["id"]] = parsed
-                    return parsed
-        except requests.RequestException:
-            pass
-        return self.tracked.get(market_id)
 
     def check_resolution(self, market_id):
         """Check if a market has resolved.  Returns winning side or None."""
         try:
             resp = requests.get(
-                f"{self.gamma_url}/markets/{market_id}",
+                f"{GAMMA_URL}/markets/{market_id}",
                 timeout=10,
             )
             if resp.status_code != 200:
                 return None
             data = resp.json()
 
-            # Check various resolution indicators
             if data.get("resolved") or data.get("closed"):
-                outcomes = data.get("outcomes", [])
                 prices = data.get("outcomePrices", [])
                 if isinstance(prices, str):
                     try:
@@ -310,7 +331,6 @@ class ArbitrageScanner:
                     except (json.JSONDecodeError, TypeError):
                         prices = []
 
-                # After resolution the winning side has price ~1.0
                 if len(prices) >= 2:
                     try:
                         p0 = float(prices[0])
@@ -322,7 +342,6 @@ class ArbitrageScanner:
                     except (ValueError, TypeError):
                         pass
 
-                # Fallback: check resolved_to or winner fields
                 winner = data.get("winner") or data.get("resolved_to")
                 if winner:
                     return str(winner).upper()
@@ -333,14 +352,14 @@ class ArbitrageScanner:
 
     def _parse(self, raw):
         mid = (
-            raw.get("condition_id")
-            or raw.get("conditionId")
-            or raw.get("id")
+            raw.get("conditionId")
+            or raw.get("condition_id")
+            or str(raw.get("id", ""))
         )
         if not mid:
             return None
 
-        end_s = raw.get("end_date_iso") or raw.get("endDate") or ""
+        end_s = raw.get("endDateIso") or raw.get("endDate") or ""
         end_time = None
         if end_s:
             try:
