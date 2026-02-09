@@ -452,10 +452,11 @@ class Polymarket15MinPaperTrader:
         else:
             print("[START] No price yet – continuing anyway")
 
+        btc_str = f"${btc:,.2f}" if btc else "N/A"
         self.telegram.send(
             "<b>Paper Trading Bot Started</b>\n\n"
             f"Mode: Paper Trading Only\n"
-            f"BTC: ${btc:,.2f if btc else 'N/A'}\n"
+            f"BTC: {btc_str}\n"
             f"Tick: {self.TICK_INTERVAL}s\n"
             f"BTC threshold: {self.BTC_CHANGE_THRESHOLD_PCT}%\n"
             f"Max winner price: ${self.MAX_WINNING_PRICE}"
