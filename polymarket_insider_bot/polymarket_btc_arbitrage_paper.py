@@ -20,10 +20,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from dotenv import load_dotenv
-
-load_dotenv(Path(__file__).parent / ".env")
-
 from config import Config
 
 # ---------------------------------------------------------------------------
@@ -56,43 +52,6 @@ CSV_HEADERS = [
     "cumulative_profit",
     "account_balance",
 ]
-
-
-# ---------------------------------------------------------------------------
-# Telegram (sync, via requests)
-# ---------------------------------------------------------------------------
-
-class TelegramNotifier:
-    API_URL = "https://api.telegram.org/bot{token}/sendMessage"
-
-    def __init__(self):
-        self.token = Config.TELEGRAM_BOT_TOKEN
-        self.chat_id = Config.TELEGRAM_CHAT_ID
-        self.enabled = bool(self.token and self.chat_id)
-        if self.enabled:
-            print(f"[TELEGRAM] Enabled (chat {self.chat_id})")
-        else:
-            print("[TELEGRAM] Disabled – missing token or chat_id")
-
-    def send(self, msg):
-        if not self.enabled:
-            return False
-        try:
-            resp = requests.post(
-                self.API_URL.format(token=self.token),
-                json={
-                    "chat_id": self.chat_id,
-                    "text": msg,
-                    "parse_mode": "HTML",
-                    "disable_web_page_preview": True,
-                },
-                timeout=10,
-            )
-            resp.raise_for_status()
-            return True
-        except Exception as e:
-            print(f"[TELEGRAM ERROR] {e}")
-            return False
 
 
 # ---------------------------------------------------------------------------
@@ -433,7 +392,6 @@ class ArbitragePaperTrader:
         print("=" * 62)
 
         self.scanner = ArbitrageScanner()
-        self.telegram = TelegramNotifier()
         self.log = TradeLog()
 
         self.entered = {}       # market_id -> entry dict (unsettled)
@@ -448,14 +406,6 @@ class ArbitragePaperTrader:
     # -- lifecycle ------------------------------------------------------------
 
     def run(self):
-        startup_msg = (
-            "<b>Arbitrage Paper Trader Started</b>\n\n"
-            f"Capital: ${CAPITAL:,.0f}\n"
-            f"Threshold: YES+NO &lt; ${ARB_THRESHOLD}\n"
-            f"Scan interval: {TICK_INTERVAL}s\n"
-            "Mode: Paper trading only"
-        )
-        self.telegram.send(startup_msg)
         print(f"\n[RUN] Polling every {TICK_INTERVAL}s  (Ctrl-C to stop)")
         print("-" * 62)
 
@@ -466,7 +416,6 @@ class ArbitragePaperTrader:
         except KeyboardInterrupt:
             print("\n[STOP] Interrupted")
             self._print_weekly_report()
-            self.telegram.send(self._weekly_report_text())
 
     # -- main loop body -------------------------------------------------------
 
@@ -478,7 +427,6 @@ class ArbitragePaperTrader:
         today = date.today()
         if today != self.current_day:
             self._print_daily_summary()
-            self._send_daily_summary()
             self.day_trades = 0
             self.day_profit = 0.0
             self.current_day = today
@@ -578,15 +526,6 @@ class ArbitragePaperTrader:
         print("=" * 62)
         print()
 
-        self.telegram.send(
-            f"<b>ENTERED ARBITRAGE</b>  (#{self.trade_count})\n\n"
-            f"<b>Market:</b> {mkt['question']}\n"
-            f"YES: ${yes_price:.3f} | NO: ${no_price:.3f} | "
-            f"Combined: ${combined:.4f}\n"
-            f"Shares: {shares:,.2f} pairs (${CAPITAL:,.0f})\n"
-            f"Expected profit: ${expected_profit:,.2f} ({expected_pct:.2f}%)"
-        )
-
     # -- settlement -----------------------------------------------------------
 
     def _settle(self, mid, winning_side):
@@ -617,15 +556,6 @@ class ArbitragePaperTrader:
         print("=" * 62)
         print()
 
-        self.telegram.send(
-            f"<b>SETTLED {'- PROFIT!' if profit >= 0 else '- LOSS'}</b>\n\n"
-            f"<b>Market:</b> {entry['question']}\n"
-            f"<b>Winner:</b> {winning_side}\n"
-            f"Payout: ${payout:,.2f} | Cost: ${entry['invested']:,.2f}\n"
-            f"<b>Profit: ${profit:+,.2f} ({profit_pct:+.2f}%)</b>\n"
-            f"Cumulative P&L: ${self.cumulative_pnl:+,.2f}"
-        )
-
     # -- daily summary --------------------------------------------------------
 
     def _print_daily_summary(self):
@@ -645,46 +575,7 @@ class ArbitragePaperTrader:
         print("*" * 62)
         print()
 
-    def _send_daily_summary(self):
-        avg = self.day_profit / self.day_trades if self.day_trades else 0.0
-        roi = (self.day_profit / CAPITAL) * 100
-        monthly = self.day_profit * 30
-
-        self.telegram.send(
-            f"<b>DAY SUMMARY ({self.current_day})</b>\n\n"
-            f"Capital: ${CAPITAL:,.0f}\n"
-            f"Trades: {self.day_trades}\n"
-            f"Total profit: ${self.day_profit:+,.2f}\n"
-            f"Avg/trade: ${avg:+,.2f}\n"
-            f"ROI today: {roi:+.2f}%\n"
-            f"Projected monthly: ${monthly:+,.0f} ({roi * 30:+.1f}%)"
-        )
-
     # -- weekly report --------------------------------------------------------
-
-    def _weekly_report_text(self):
-        stats = self.log.get_stats()
-        days_running = max(
-            1,
-            (datetime.now(timezone.utc).date() - self.current_day).days + 1
-        )
-        trades_per_day = stats["settled"] / days_running if days_running else 0
-        monthly_proj = (stats["total_profit"] / days_running) * 30
-
-        return (
-            "<b>WEEKLY REPORT</b>\n\n"
-            f"Starting capital: ${CAPITAL:,.0f}\n"
-            f"Total trades: {stats['total_trades']}\n"
-            f"Settled: {stats['settled']}\n"
-            f"Wins: {stats['wins']}\n"
-            f"Total profit: ${stats['total_profit']:+,.2f}\n"
-            f"ROI: {stats['roi_pct']:+.2f}%\n"
-            f"Avg profit/trade: ${stats['avg_profit']:+,.2f}\n"
-            f"Trades/day: {trades_per_day:.1f}\n"
-            f"Best trade: ${stats['best_profit']:+,.2f} "
-            f"({stats['best_pct']:+.2f}%)\n"
-            f"Projected monthly: ${monthly_proj:+,.0f}"
-        )
 
     def _print_weekly_report(self):
         stats = self.log.get_stats()
